@@ -12,7 +12,7 @@ This repository contains the database schema, initialization scripts, and sample
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
@@ -27,7 +27,7 @@ This repository contains the database schema, initialization scripts, and sample
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/jc-olalla/geoviewer-db.git
+git clone https://github.com/your-org/geoviewer-db.git
 cd geoviewer-db
 ```
 
@@ -42,11 +42,11 @@ This will:
 - Launch a PostgreSQL container
 - Initialize the `geoviewer` database
 - Run the SQL scripts from `init-scripts/`
-- Load sample layers from `sample_layers.csv` (if present)
+- Optionally load sample layers from `sample_layers.csv` (if present)
 
 ---
 
-## Rebuilding or Resetting
+## 🔁 Rebuilding or Resetting
 
 If the container name is already taken, you might see:
 
@@ -69,7 +69,7 @@ sudo docker-compose up --build
 
 ---
 
-## Accessing the Database
+## 🐚 Accessing the Database
 
 To connect using `psql`:
 
