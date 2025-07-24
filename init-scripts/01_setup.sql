@@ -1,4 +1,5 @@
 -- setup.sql
+\c
 DROP DATABASE IF EXISTS gis_viewer;
 DROP USER IF EXISTS gis_admin;
 
