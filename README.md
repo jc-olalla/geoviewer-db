@@ -1,71 +1,71 @@
 # GeoViewer Database
 
-This repository contains the database schema, initialization scripts, and sample data for the GeoViewer project. It is modular, extensible, and designed to work as part of the full GeoViewer stack.
-
----
-
-## 📦 Stack
-
-- **PostgreSQL 16**
-- Optional support for **PostGIS**
-- Init system based on **SQL + CSV**
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- [Docker](https://www.docker.com/)
-- [Docker Compose](https://docs.docker.com/compose/)
-- (Optional) [psql CLI](https://www.postgresql.org/docs/current/app-psql.html)
-
----
+This repository contains the database schema per tenant/organization, initialization scripts, and sample data for the GeoViewer project. It is modular, extensible, and designed to work as part of the full GeoViewer stack.
 
 ### 🛠️ Setup
 
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/your-org/geoviewer-db.git
+git clone https://github.com/jc-olalla/geoviewer-db.git
 cd geoviewer-db
 ```
 
 2. **Start the database**
 
 ```bash
-sudo docker-compose up --build
+# Fix permissions
+sudo groupadd docker 2>/dev/null || true
+sudo usermod -aG docker $USER
+newgrp docker
+docker run --rm hello-world
+
+# 0) (optional) stop any app/migrator containers using the DB
+docker rm -f pg-catalog || true
+
+# 1) start a fresh Postgres 16
+#    NOTE: we also mount the CSV so COPY ... FROM works later (see seed note below)
+docker run --name pg-catalog \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5432:5432 \
+  -v "$PWD/sql/sample_layers.csv":/docker-entrypoint-initdb.d/sample_layers.csv:ro \
+  -d postgres:16
+
+# Build docker image
+docker build -f Dockerfile.migrator -t catalog-migrator:latest .
+
+# If running locally, start Postgres as a container, listening on host port 5432
+#docker run --name pg-catalog -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:16
+
+# Sanity check: list DBs (should connect)
+psql "postgresql://postgres:postgres@localhost:5432/postgres" -c "\l"
+
+# Create tenant DB(s) + apply schema (using migrator)
+docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
+  -v "$(pwd)/tenants.yaml:/work/tenants.yaml:ro" \
+  catalog-migrator:latest \
+  bootstrap --tenants /work/tenants.yaml \
+  --admin-dsn postgresql://postgres:postgres@host.docker.internal:5432/postgres
+
+# Seed
+docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
+  -v "$PWD/tenants.yaml:/work/tenants.yaml:ro" \
+  catalog-migrator:latest \
+  seed --tenants /work/tenants.yaml
+
+# print env for the api
+TENANT_DSN_MAP=$(docker run --rm \
+  -v "$PWD/tenants.yaml:/work/tenants.yaml:ro" \
+  catalog-migrator:latest \
+  print-env --tenants /work/tenants.yaml)
+echo "$TENANT_DSN_MAP"
+
+
 ```
 
-This will:
 
-- Launch a PostgreSQL container
-- Initialize the `geoviewer` database
-- Run the SQL scripts from `init-scripts/`
-- Optionally load sample layers from `sample_layers.csv` (if present)
-
----
-
-## 🔁 Rebuilding or Resetting
-
-If the container name is already taken, you might see:
-
-```
-Cannot create container for service db: Conflict. The container name "/geoviewer_db" is already in use...
-```
-
-To fix it:
-
-```bash
-sudo docker rm geoviewer_db
-```
-
-Or remove everything and rebuild from scratch:
-
-```bash
-sudo docker-compose down -v
-sudo docker-compose up --build
-```
 
 ---
 
