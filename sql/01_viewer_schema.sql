@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS layers (
     viewer_id    integer NOT NULL REFERENCES viewers(id) ON DELETE CASCADE,
     type         text NOT NULL CHECK (type IN (
                    'wms','wfs','wcs','file','xyz','vector',
-                   'http','ogc_features','supabase_rest'
+                   'http','ogc_features','supabase_rest','rest'
                  )),
     name         text NOT NULL,
     title        text,

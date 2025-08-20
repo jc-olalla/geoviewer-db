@@ -38,7 +38,7 @@ docker build -f Dockerfile.migrator -t catalog-migrator:latest .
 #docker run --name pg-catalog -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:16
 
 # Sanity check: list DBs (should connect)
-psql "postgresql://postgres:postgres@localhost:5432/postgres" -c "\l"
+#psql "postgresql://postgres:postgres@localhost:5432/postgres" -c "\l"
 
 # Create tenant DB(s) + apply schema (using migrator)
 docker run --rm \
