@@ -1,16 +1,12 @@
-name: Catalog Migrator
+name: Catalog Provisioner
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch: {}
 
-# This workflow shows two common paths:
-# 1) A local smoke test against an ephemeral Postgres (actions "service")
-# 2) Remote runs (e.g., Supabase) using a DB URL secret
-
 jobs:
-  # --- 1) Smoke test against an ephemeral Postgres 16 ---
+  # 1) Quick sanity check against a throwaway Postgres 16
   smoke-test:
     runs-on: ubuntu-latest
 
@@ -21,25 +17,20 @@ jobs:
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
-        # healthcheck so steps wait until DB is ready
         options: >-
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
 
-    env:
-      # toggle to run the 'seed' step in CI if you want
-      SEED_SAMPLE_DATA: "false"
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build migrator image (Dockerfile.migrator)
+      - name: Build migrator image
         run: docker build -f Dockerfile.migrator -t catalog-migrator:latest .
 
-      - name: Bootstrap (create shared objects + tenant schemas)
+      - name: Bootstrap (schemas/initial tenants) on ephemeral DB
         run: |
           docker run --rm \
             --add-host=host.docker.internal:host-gateway \
@@ -48,27 +39,12 @@ jobs:
             bootstrap --tenants /work/tenants.yaml \
             --admin-dsn "postgresql://postgres:postgres@host.docker.internal:5432/postgres"
 
-      # NOTE: In your README you mounted sample_layers.csv into the *Postgres* container.
-      # With Actions "services", mounting host files into the service at startup is awkward.
-      # Keep SEED off by default here; enable only if your seed does not require that mount.
-      - name: Seed sample data (optional)
-        if: ${{ env.SEED_SAMPLE_DATA == 'true' }}
+      - name: Print tenant DSN map (artifact)
         run: |
           docker run --rm \
-            --add-host=host.docker.internal:host-gateway \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
             catalog-migrator:latest \
-            seed --tenants /work/tenants.yaml \
-            --admin-dsn "postgresql://postgres:postgres@host.docker.internal:5432/postgres"
-
-      - name: Print tenant DSN map (for API)
-        id: print_env
-        run: |
-          TENANT_DSN_MAP=$(docker run --rm \
-            -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
-            catalog-migrator:latest \
-            print-env --tenants /work/tenants.yaml)
-          echo "$TENANT_DSN_MAP" | tee tenant_dsn_map.txt
+            print-env --tenants /work/tenants.yaml | tee tenant_dsn_map.txt
 
       - name: Upload DSN map
         uses: actions/upload-artifact@v4
@@ -76,60 +52,22 @@ jobs:
           name: tenant-dsn-map
           path: tenant_dsn_map.txt
 
-  # --- 2) Remote apply (e.g., Supabase project) ---
-  # Store the Postgres connection string in the target Environment as secret DB_URL.
-  # Give 'prod' an approval gate in GitHub Environments if you want.
-  deploy-staging:
-    runs-on: ubuntu-latest
-    needs: [ smoke-test ]
-    environment: staging
-    env:
-      SEED_SAMPLE_DATA: "false" # usually don't seed in staging either; toggle if you want
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build migrator image
-        run: docker build -f Dockerfile.migrator -t catalog-migrator:latest .
-
-      - name: Bootstrap (staging)
-        env:
-          DB_URL: ${{ secrets.DB_URL }}
-        run: |
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
-            catalog-migrator:latest \
-            bootstrap --tenants /work/tenants.yaml \
-            --admin-dsn "${DB_URL}"
-
-      - name: Seed sample data (optional)
-        if: ${{ env.SEED_SAMPLE_DATA == 'true' }}
-        env:
-          DB_URL: ${{ secrets.DB_URL }}
-        run: |
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
-            catalog-migrator:latest \
-            seed --tenants /work/tenants.yaml \
-            --admin-dsn "${DB_URL}"
-
+  # 2) Apply to production (Supabase or any Postgres) — uses Environment "prod"
   deploy-prod:
     runs-on: ubuntu-latest
-    needs: [ deploy-staging ]
+    needs: [ smoke-test ]
     environment: prod
-    env:
-      SEED_SAMPLE_DATA: "false"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Build migrator image
         run: docker build -f Dockerfile.migrator -t catalog-migrator:latest .
 
-      - name: Plan/Bootstrap (prod)
+      - name: Bootstrap (prod)
         env:
           DB_URL: ${{ secrets.DB_URL }}
         run: |
-          # If you support a 'plan' mode, call it here first.
-          # Then apply:
           docker run --rm \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
             catalog-migrator:latest \
