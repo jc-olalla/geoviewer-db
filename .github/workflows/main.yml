@@ -69,6 +69,7 @@ jobs:
           DB_URL: ${{ secrets.DB_URL }}   # pulled from the chosen Environment
         run: |
           docker run --rm \
+            --add-host=host.docker.internal:host-gateway \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
             catalog-migrator:latest \
             bootstrap --tenants /work/tenants.yaml \
