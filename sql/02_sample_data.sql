@@ -1,6 +1,9 @@
 -- 02_sample_data.sql
+-- Idempotent seed 
 
--- Ensure sample users exist (idempotent)
+-- -------------------------------------------------------------------
+-- Users (create if missing)
+-- -------------------------------------------------------------------
 INSERT INTO users (username, password_hash, role, email, is_system, is_active)
 SELECT 'admin', 'fake_hash', 'admin', 'admin@example.local', false, true
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
@@ -9,7 +12,9 @@ INSERT INTO users (username, password_hash, role, email, is_system, is_active)
 SELECT 'user1', 'fake_hash2', 'user', 'user1@example.local', false, true
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'user1');
 
--- Viewers owned by the right users (no hardcoded IDs)
+-- -------------------------------------------------------------------
+-- Viewers (owned by the right users; no hardcoded IDs)
+-- -------------------------------------------------------------------
 INSERT INTO viewers (name, slug, owner_id, is_public)
 SELECT 'Main Viewer', 'main-viewer',
        (SELECT id FROM users WHERE username = 'admin'),
@@ -22,14 +27,52 @@ SELECT 'Private Viewer', 'private-viewer',
        FALSE
 WHERE NOT EXISTS (SELECT 1 FROM viewers WHERE slug = 'private-viewer');
 
--- Load layers from CSV
--- NOTE: This path is on the *server* (inside the Postgres container).
--- Mount the file there (e.g., -v "$PWD/sql/sample_layers.csv":/docker-entrypoint-initdb.d/sample_layers.csv:ro)
-COPY layers(viewer_id, type, name, title, url, layer_name, version, crs, format, tiled, opacity, visible, sort_order, layer_params)
-FROM '/docker-entrypoint-initdb.d/sample_layers.csv'
-WITH (FORMAT csv, HEADER true);
+-- -------------------------------------------------------------------
+-- Layers 
+-- -------------------------------------------------------------------
 
--- Grant permissions (defines its own CTEs in the same statement)
+-- BAG Pand (WMS) in Main Viewer
+INSERT INTO layers (
+  viewer_id, type, name, title, url, layer_name, version, crs, format,
+  tiled, opacity, visible, sort_order, layer_params
+)
+SELECT v.id, 'wms', 'bag_pand', 'BAG Pand',
+       'https://service.pdok.nl/lv/bag/wms/v2_0', 'pand', '1.1.1',
+       'EPSG:3857', 'image/png',
+       TRUE, 0.8, TRUE, 1, '{"TRANSPARENT":"true"}'::jsonb
+FROM viewers v
+WHERE v.slug = 'main-viewer'
+  AND NOT EXISTS (SELECT 1 FROM layers l WHERE l.name = 'bag_pand');
+
+-- BAG Pand (WFS) in Private Viewer
+INSERT INTO layers (
+  viewer_id, type, name, title, url, layer_name, version, crs, format,
+  tiled, opacity, visible, sort_order, layer_params
+)
+SELECT v.id, 'wfs', 'bag_pand_wfs', 'BAG Pand (WFS)',
+       'https://service.pdok.nl/lv/bag/wfs/v2_0', 'pand', '2.0.0',
+       'EPSG:28992', 'application/json',
+       FALSE, 1.0, FALSE, 2, '{}'::jsonb
+FROM viewers v
+WHERE v.slug = 'private-viewer'
+  AND NOT EXISTS (SELECT 1 FROM layers l WHERE l.name = 'bag_pand_wfs');
+
+-- Mogelijk Portiekwoningen (Supabase REST) in Main Viewer
+INSERT INTO layers (
+  viewer_id, type, name, title, url, layer_name, version, crs, format,
+  tiled, opacity, visible, sort_order, layer_params
+)
+SELECT v.id, 'supabase_rest', 'mogelijk_portiekwoningen', 'Mogeglijk Portiekwoningen',
+       'https://dctmgvivsthofjcmejsd.supabase.co/rest/v1/buildings_geojson', 'dummy', 'v1',
+       'EPSG:3857', 'application/json',
+       FALSE, 1.0, FALSE, 2, '{}'::jsonb
+FROM viewers v
+WHERE v.slug = 'main-viewer'
+  AND NOT EXISTS (SELECT 1 FROM layers l WHERE l.name = 'mogelijk_portiekwoningen');
+
+-- -------------------------------------------------------------------
+-- Viewer permissions (grant 'read' on the private viewer to user1)
+-- -------------------------------------------------------------------
 WITH v_private AS (
   SELECT id AS viewer_id FROM viewers WHERE slug = 'private-viewer'
 ),
@@ -44,4 +87,3 @@ WHERE NOT EXISTS (
   FROM viewer_permissions vp
   WHERE vp.viewer_id = v.viewer_id AND vp.user_id = u.user_id
 );
-
