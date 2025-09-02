@@ -52,7 +52,7 @@ jobs:
 
   # 2) Provision the selected target (Supabase, warehouse, etc.)
   provision:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, X64]
     needs: [ smoke-test ]
     if: ${{ always() && (inputs.run_smoke_test == 'false' || needs.smoke-test.result == 'success') }}
     environment: ${{ inputs.target_environment }}
