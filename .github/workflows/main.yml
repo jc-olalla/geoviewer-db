@@ -14,6 +14,12 @@ on:
         default: "true"
         type: choice
         options: ["true", "false"]
+      run_seed:
+        description: "Run seed after bootstrap?"
+        required: true
+        default: "false"
+        type: choice
+        options: ["true", "false"]
 
 jobs:
   # 1) Optional smoke test against a throwaway Postgres 16
@@ -73,4 +79,16 @@ jobs:
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
             catalog-migrator:latest \
             bootstrap --tenants /work/tenants.yaml \
+            --admin-dsn "${DB_URL}"
+
+      - name: Seed (optional)
+        if: ${{ inputs.run_seed == 'true' }}
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          docker run --rm \
+            --add-host=host.docker.internal:host-gateway \
+            -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
+            catalog-migrator:latest \
+            seed --tenants /work/tenants.yaml \
             --admin-dsn "${DB_URL}"
