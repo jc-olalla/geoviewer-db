@@ -1,13 +1,24 @@
 name: Catalog Provisioner
 
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: "GitHub Environment to provision (must exist and contain a DB_URL secret)"
+        required: true
+        default: "linux_laptop"
+        type: string
+      run_smoke_test:
+        description: "Run ephemeral Postgres smoke test first?"
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
 
 jobs:
-  # 1) Quick sanity check against a throwaway Postgres 16
+  # 1) Optional smoke test against a throwaway Postgres 16
   smoke-test:
+    if: ${{ inputs.run_smoke_test == 'true' }}
     runs-on: ubuntu-latest
 
     services:
@@ -27,10 +38,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build migrator image
+      - name: Build provisioner image
         run: docker build -f Dockerfile.migrator -t catalog-migrator:latest .
 
-      - name: Bootstrap (schemas/initial tenants) on ephemeral DB
+      - name: Bootstrap on ephemeral DB
         run: |
           docker run --rm \
             --add-host=host.docker.internal:host-gateway \
@@ -39,34 +50,23 @@ jobs:
             bootstrap --tenants /work/tenants.yaml \
             --admin-dsn "postgresql://postgres:postgres@host.docker.internal:5432/postgres"
 
-      - name: Print tenant DSN map (artifact)
-        run: |
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
-            catalog-migrator:latest \
-            print-env --tenants /work/tenants.yaml | tee tenant_dsn_map.txt
-
-      - name: Upload DSN map
-        uses: actions/upload-artifact@v4
-        with:
-          name: tenant-dsn-map
-          path: tenant_dsn_map.txt
-
-  # 2) Apply to production (Supabase or any Postgres) — uses Environment "prod"
-  deploy-prod:
+  # 2) Provision the selected target (Supabase, warehouse, etc.)
+  provision:
     runs-on: ubuntu-latest
     needs: [ smoke-test ]
-    environment: prod
+    if: ${{ always() && (inputs.run_smoke_test == 'false' || needs.smoke-test.result == 'success') }}
+    environment: ${{ inputs.target_environment }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build migrator image
+      - name: Build provisioner image
         run: docker build -f Dockerfile.migrator -t catalog-migrator:latest .
 
-      - name: Bootstrap (prod)
+      - name: Bootstrap on target environment
         env:
-          DB_URL: ${{ secrets.DB_URL }}
+          DB_URL: ${{ secrets.DB_URL }}   # pulled from the chosen Environment
         run: |
           docker run --rm \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
