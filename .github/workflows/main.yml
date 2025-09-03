@@ -74,3 +74,15 @@ jobs:
             catalog-provisioner:latest \
             bootstrap --tenants /work/tenants.yaml \
             --admin-dsn "${DB_URL}"
+
+      - name: Seed (always, after bootstrap)
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          docker run --rm \
+            --add-host=host.docker.internal:host-gateway \
+            -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
+            catalog-migrator:latest \
+            seed --tenants /work/tenants.yaml \
+            --admin-dsn "${DB_URL}"
+
