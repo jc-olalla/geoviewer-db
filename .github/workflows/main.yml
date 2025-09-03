@@ -4,19 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       target_environment:
-        description: "GitHub Environment to provision (must exist and contain a DB_URL secret)"
+        description: "Environment to provision (must exist and contain a DB_URL secret)"
+        type: choice
         required: true
-        default: "linux_laptop"
-        type: string
+        default: supabase
+        options:
+          - supabase
+          - linux_laptop
       run_smoke_test:
         description: "Run ephemeral Postgres smoke test first?"
+        type: choice
         required: true
         default: "true"
-        type: choice
         options: ["true", "false"]
+      provision_runner:
+        description: "Runner for the provision job"
+        type: choice
+        required: true
+        default: github-hosted
+        options:
+          - github-hosted         # uses ubuntu-latest
+          - self-hosted-linux-x64 # uses [self-hosted, Linux, X64]
 
 jobs:
-  # 1) Optional smoke test against a throwaway Postgres 16
+  # 1) Optional quick sanity check against a throwaway Postgres 16
   smoke-test:
     if: ${{ inputs.run_smoke_test == 'true' }}
     runs-on: ubuntu-latest
@@ -50,11 +61,24 @@ jobs:
             bootstrap --tenants /work/tenants.yaml \
             --admin-dsn "postgresql://postgres:postgres@host.docker.internal:5432/postgres"
 
-  # 2) Provision the selected target (Supabase, warehouse, etc.)
+      - name: Seed on ephemeral DB (after bootstrap)
+        run: |
+          docker run --rm \
+            --add-host=host.docker.internal:host-gateway \
+            -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
+            catalog-provisioner:latest \
+            seed --tenants /work/tenants.yaml
+
+  # 2) Provision the selected target (Supabase, warehouse, laptop, etc.)
   provision:
-    runs-on: [self-hosted, Linux, X64]
+    # Pick the runner from the dropdown:
+    # - github-hosted         -> "ubuntu-latest"
+    # - self-hosted-linux-x64 -> ["self-hosted","Linux","X64"]
+    runs-on: ${{ inputs.provision_runner == 'github-hosted'
+                && 'ubuntu-latest'
+                || fromJSON('["self-hosted","Linux","X64"]') }}
     needs: [ smoke-test ]
-    if: ${{ always() && (inputs.run_smoke_test == 'false' || needs.smoke-test.result == 'success') }}
+    if: ${{ inputs.run_smoke_test == 'false' || needs.smoke-test.result == 'success' }}
     environment: ${{ inputs.target_environment }}
 
     steps:
@@ -75,13 +99,10 @@ jobs:
             bootstrap --tenants /work/tenants.yaml \
             --admin-dsn "${DB_URL}"
 
-      - name: Seed (always, after bootstrap)
-        env:
-          DB_URL: ${{ secrets.DB_URL }}
+      - name: Seed on target (after bootstrap)
         run: |
           docker run --rm \
             --add-host=host.docker.internal:host-gateway \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
-            catalog-migrator:latest \
-            seed --tenants /work/tenants.yaml \
-
+            catalog-provisioner:latest \
+            seed --tenants /work/tenants.yaml
