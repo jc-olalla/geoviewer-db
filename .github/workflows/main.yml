@@ -14,12 +14,6 @@ on:
         default: "true"
         type: choice
         options: ["true", "false"]
-      run_seed:
-        description: "Run seed after bootstrap?"
-        required: true
-        default: "false"
-        type: choice
-        options: ["true", "false"]
 
 jobs:
   # 1) Optional smoke test against a throwaway Postgres 16
@@ -45,14 +39,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build provisioner image
-        run: docker build -f Dockerfile.migrator -t catalog-migrator:latest .
+        run: docker build -f Dockerfile.provisioner -t catalog-provisioner:latest .
 
       - name: Bootstrap on ephemeral DB
         run: |
           docker run --rm \
             --add-host=host.docker.internal:host-gateway \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
-            catalog-migrator:latest \
+            catalog-provisioner:latest \
             bootstrap --tenants /work/tenants.yaml \
             --admin-dsn "postgresql://postgres:postgres@host.docker.internal:5432/postgres"
 
@@ -68,7 +62,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build provisioner image
-        run: docker build -f Dockerfile.migrator -t catalog-migrator:latest .
+        run: docker build -f Dockerfile.provisioner -t catalog-provisioner:latest .
 
       - name: Bootstrap on target environment
         env:
@@ -77,18 +71,6 @@ jobs:
           docker run --rm \
             --add-host=host.docker.internal:host-gateway \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
-            catalog-migrator:latest \
+            catalog-provisioner:latest \
             bootstrap --tenants /work/tenants.yaml \
-            --admin-dsn "${DB_URL}"
-
-      - name: Seed (optional)
-        if: ${{ inputs.run_seed == 'true' }}
-        env:
-          DB_URL: ${{ secrets.DB_URL }}
-        run: |
-          docker run --rm \
-            --add-host=host.docker.internal:host-gateway \
-            -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
-            catalog-migrator:latest \
-            seed --tenants /work/tenants.yaml \
             --admin-dsn "${DB_URL}"

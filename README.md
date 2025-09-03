@@ -2,7 +2,7 @@
 
 Provision a **schema-per-tenant** PostgreSQL database for GeoViewer on **any infrastructure** (Supabase, managed Postgres, a company warehouse, or a local laptop for testing). Provisioning is executed by **GitHub Actions** using the Dockerized provisioner in this repo—no manual Docker commands required.
 
-- **Provisioner:** `Dockerfile.migrator` + `scripts/catalogctl.py`  
+- **Provisioner:** `Dockerfile.provisioner` + `scripts/catalogctl.py`  
 - **Schema SQL:** `sql/01_viewer_schema.sql` (+ optional `sql/02_sample_data.sql`)  
 - **Tenants manifest:** `tenants.yaml`  
 - **Workflow:** `.github/workflows/main.yml` (builds the image and runs it)
@@ -87,6 +87,11 @@ psql "postgresql://USER:PASSWORD@HOST:PORT/DBNAME" -c "SELECT nspname FROM pg_na
  ORDER BY 1;"
 ```
 
+Inspect local DB from your host:
+```bash
+psql "postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+```
+
 You should see the tenant schemas from `tenants.yaml` (e.g., `brandweer`). To list tables for a tenant: `\dt tenant_name.*`
 
 ---
@@ -114,7 +119,7 @@ The workflow focuses on provisioning. If you later enable seeding with `sql/02_s
 
 ```
 .
-├── Dockerfile.migrator
+├── Dockerfile.provisioner
 ├── README.md
 ├── scripts/
 │   └── catalogctl.py
