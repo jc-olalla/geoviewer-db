@@ -1,4 +1,4 @@
-# geoviewer-db/tenants.yaml  (FOR MIGRATOR)
+# geoviewer-db/tenants.yaml  (FOR PROVISIONER)
 tenants:
   - slug: brandweer
     dbname: brandweer_catalog
