@@ -84,5 +84,4 @@ jobs:
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
             catalog-migrator:latest \
             seed --tenants /work/tenants.yaml \
-            --admin-dsn "${DB_URL}"
 
