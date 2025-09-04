@@ -68,11 +68,14 @@ def compose_dsn(base_dsn: str, schema: str) -> str:
     return urlunparse(pr)
 
 
-def run_sql_file(dsn: str, sql_file: Path) -> None:
+def run_sql_file(dsn: str, sql_file: Path, schema: str) -> None:
     sql = sql_file.read_text()
-    with psycopg.connect(dsn, autocommit=True) as conn:
+    # one transaction so SET LOCAL applies to every statement in the file
+    with psycopg.connect(dsn, autocommit=False) as conn:
         with conn.cursor() as cur:
+            cur.execute(f'SET LOCAL search_path = "{schema}", public')
             cur.execute(sql)
+        conn.commit()
 
 
 def ensure_schema(dsn: str, schema: str) -> None:
@@ -91,7 +94,7 @@ def cmd_bootstrap(args) -> None:
         print(f'  -> ensure schema "{t["schema"]}"')
         ensure_schema(dsn, t["schema"])
         print("  -> apply schema")
-        run_sql_file(dsn, SQL_SCHEMA)
+        run_sql_file(dsn, SQL_SCHEMA, t["schema"])
     print("Done.")
 
 
@@ -102,7 +105,7 @@ def cmd_seed(args) -> None:
     for t in tenants:
         print(f"== {t['slug']} (seed) ==")
         dsn = compose_dsn(args.base_dsn, t["schema"])
-        run_sql_file(dsn, SQL_SEED)
+        run_sql_file(dsn, SQL_SEED, t["schema"])
     print("Done.")
 
 
