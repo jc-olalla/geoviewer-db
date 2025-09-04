@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Dict, List
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 import yaml
 
