@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """
-Catalog bootstrap/migrate helper.
+GeoViewer catalog provisioner (single DB, schema-per-tenant).
 
 Commands:
-  - bootstrap: create DBs (optional) and apply schema SQL to each tenant
-  - seed:      apply seed SQL to each tenant
-  - print-env: print TENANT_DSN_MAP JSON for the API
+  - bootstrap: ensure tenant schema exists, then apply schema SQL
+  - seed:      apply seed SQL
+  - print-env: emit {slug: dsn} map (composed from --base-dsn)
 
-Requires: pip install psycopg[binary] pyyaml
+Usage:
+  python scripts/catalogctl.py bootstrap --tenants tenants.yaml --base-dsn "postgresql://.../postgres?sslmode=require"
+  python scripts/catalogctl.py seed      --tenants tenants.yaml --base-dsn "postgresql://.../postgres?sslmode=require"
+  python scripts/catalogctl.py print-env --tenants tenants.yaml --base-dsn "postgresql://.../postgres?sslmode=require"
+
+Requires: psycopg[binary], pyyaml
 """
 from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
 import sys
-from typing import List
+from typing import Dict, List
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import yaml
 
@@ -36,25 +42,28 @@ def load_tenants(path: Path) -> List[dict]:
         out.append(
             {
                 "slug": slug,
-                "dbname": t.get("dbname") or f"{slug}_catalog",
-                "dsn": t["dsn"],
-                "create": bool(t.get("create", False)),
+                "schema": (t.get("schema") or slug),
+                "description": t.get("description"),
             }
         )
     return out
 
 
-def create_db_if_needed(admin_dsn: str, dbname: str) -> None:
-    # Connect to admin DB (usually 'postgres') to create databases
-    with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM pg_database WHERE datname=%s", (dbname,))
-            exists = cur.fetchone() is not None
-            if not exists:
-                cur.execute(f'CREATE DATABASE "{dbname}"')
-                print(f"  created {dbname}")
-            else:
-                print(f"  exists {dbname}")
+def compose_dsn(base_dsn: str, schema: str) -> str:
+    """Append search_path to base_dsn via libpq 'options', preserving existing params."""
+    pr = urlparse(base_dsn)
+    # Default database path if omitted (e.g., user passed a cluster DSN)
+    if not pr.path or pr.path == "/":
+        pr = pr._replace(path="/postgres")
+    q: Dict[str, str] = dict(parse_qsl(pr.query, keep_blank_values=True))
+    addition = f"-csearch_path={schema},public"
+    q["options"] = (
+        f"{q['options']} {addition}".strip()
+        if "options" in q and q["options"]
+        else addition
+    )
+    pr = pr._replace(query=urlencode(q, safe=",=:-_ "))
+    return urlunparse(pr)
 
 
 def run_sql_file(dsn: str, sql_file: Path) -> None:
@@ -64,16 +73,23 @@ def run_sql_file(dsn: str, sql_file: Path) -> None:
             cur.execute(sql)
 
 
+def ensure_schema(dsn: str, schema: str) -> None:
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'CREATE SCHEMA IF NOT EXISTS "{schema}" AUTHORIZATION CURRENT_USER'
+            )
+
+
 def cmd_bootstrap(args) -> None:
     tenants = load_tenants(Path(args.tenants))
-    if any(t["create"] for t in tenants) and not args.admin_dsn:
-        sys.exit("bootstrap: --admin-dsn is required when any tenant has create: true")
     for t in tenants:
         print(f"== {t['slug']} ==")
-        if t["create"]:
-            create_db_if_needed(args.admin_dsn, t["dbname"])
+        dsn = compose_dsn(args.base_dsn, t["schema"])
+        print(f'  -> ensure schema "{t["schema"]}"')
+        ensure_schema(dsn, t["schema"])
         print("  -> apply schema")
-        run_sql_file(t["dsn"], SQL_SCHEMA)
+        run_sql_file(dsn, SQL_SCHEMA)
     print("Done.")
 
 
@@ -83,13 +99,14 @@ def cmd_seed(args) -> None:
     tenants = load_tenants(Path(args.tenants))
     for t in tenants:
         print(f"== {t['slug']} (seed) ==")
-        run_sql_file(t["dsn"], SQL_SEED)
+        dsn = compose_dsn(args.base_dsn, t["schema"])
+        run_sql_file(dsn, SQL_SEED)
     print("Done.")
 
 
 def cmd_print_env(args) -> None:
     tenants = load_tenants(Path(args.tenants))
-    mapping = {t["slug"]: t["dsn"] for t in tenants}
+    mapping = {t["slug"]: compose_dsn(args.base_dsn, t["schema"]) for t in tenants}
     print(json.dumps(mapping))
 
 
@@ -97,17 +114,19 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p1 = sub.add_parser("bootstrap", help="create DBs (optional) + apply schema")
+    p1 = sub.add_parser("bootstrap", help="ensure tenant schemas + apply schema SQL")
     p1.add_argument("--tenants", required=True)
-    p1.add_argument("--admin-dsn")
+    p1.add_argument("--base-dsn", required=True)
     p1.set_defaults(func=cmd_bootstrap)
 
-    p2 = sub.add_parser("seed", help="apply seed SQL to each tenant DB")
+    p2 = sub.add_parser("seed", help="apply seed SQL to each tenant")
     p2.add_argument("--tenants", required=True)
+    p2.add_argument("--base-dsn", required=True)
     p2.set_defaults(func=cmd_seed)
 
-    p3 = sub.add_parser("print-env", help="print TENANT_DSN_MAP JSON")
+    p3 = sub.add_parser("print-env", help="print TENANT_DSN_MAP JSON (composed)")
     p3.add_argument("--tenants", required=True)
+    p3.add_argument("--base-dsn", required=True)
     p3.set_defaults(func=cmd_print_env)
 
     args = ap.parse_args()

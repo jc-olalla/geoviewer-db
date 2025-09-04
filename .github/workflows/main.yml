@@ -59,7 +59,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
             catalog-provisioner:latest \
             bootstrap --tenants /work/tenants.yaml \
-            --admin-dsn "postgresql://postgres:postgres@host.docker.internal:5432/postgres"
+            --base-dsn "postgresql://postgres:postgres@host.docker.internal:5432/postgres"
 
       - name: Seed on ephemeral DB (after bootstrap)
         run: |
@@ -67,11 +67,12 @@ jobs:
             --add-host=host.docker.internal:host-gateway \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
             catalog-provisioner:latest \
-            seed --tenants /work/tenants.yaml
+            seed --tenants /work/tenants.yaml \
+            --base-dsn "postgresql://postgres:postgres@host.docker.internal:5432/postgres"
 
-  # 2) Provision the selected target (Supabase, warehouse, laptop, etc.)
+  # 2) Provision the selected target (Supabase or laptop, etc.)
   provision:
-    # Pick the runner from the dropdown:
+    # Choose runner from the dropdown:
     # - github-hosted         -> "ubuntu-latest"
     # - self-hosted-linux-x64 -> ["self-hosted","Linux","X64"]
     runs-on: ${{ inputs.provision_runner == 'github-hosted'
@@ -80,6 +81,9 @@ jobs:
     needs: [ smoke-test ]
     if: ${{ inputs.run_smoke_test == 'false' || needs.smoke-test.result == 'success' }}
     environment: ${{ inputs.target_environment }}
+    env:
+      # Add host mapping only when running on a self-hosted Linux runner
+      ADD_HOST_FLAG: ${{ inputs.provision_runner == 'self-hosted-linux-x64' && '--add-host=host.docker.internal:host-gateway' || '' }}
 
     steps:
       - name: Checkout
@@ -90,19 +94,21 @@ jobs:
 
       - name: Bootstrap on target environment
         env:
-          DB_URL: ${{ secrets.DB_URL }}   # pulled from the chosen Environment
+          DB_URL: ${{ secrets.DB_URL }}   # one database URL for the chosen Environment
         run: |
-          docker run --rm \
-            --add-host=host.docker.internal:host-gateway \
+          docker run --rm $ADD_HOST_FLAG \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
             catalog-provisioner:latest \
             bootstrap --tenants /work/tenants.yaml \
-            --admin-dsn "${DB_URL}"
+            --base-dsn "${DB_URL}"
 
       - name: Seed on target (after bootstrap)
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
         run: |
-          docker run --rm \
-            --add-host=host.docker.internal:host-gateway \
+          docker run --rm $ADD_HOST_FLAG \
             -v "${GITHUB_WORKSPACE}/tenants.yaml:/work/tenants.yaml:ro" \
             catalog-provisioner:latest \
-            seed --tenants /work/tenants.yaml
+            seed --tenants /work/tenants.yaml \
+            --base-dsn "${DB_URL}"
+

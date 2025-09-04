@@ -1,7 +1,7 @@
 -- 01_viewer_schema.sql (tenant-scoped catalog DB)
 
 -- 1) housekeeping
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
 
 -- 2) updated_at trigger helper
 CREATE OR REPLACE FUNCTION set_updated_at()

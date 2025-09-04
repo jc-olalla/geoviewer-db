@@ -1,11 +1,8 @@
 # geoviewer-db/tenants.yaml  (FOR PROVISIONER)
 tenants:
-  - slug: brandweer
-    dbname: brandweer_catalog
-    dsn: postgresql://postgres:postgres@host.docker.internal:5432/brandweer_catalog
-    create: false
+  - slug: brandweer_zhz
+    description: brandweer zuid-holland zuid
   - slug: vik
-    dbname: vik_catalog
-    dsn: postgresql://postgres:postgres@host.docker.internal:5432/vik_catalog
-    create: false
+    description: Veiligheidsinformatieknooppunt coalitie VRR-ZHZ
+
 
