@@ -50,23 +50,21 @@ def load_tenants(path: Path) -> List[dict]:
 
 
 def compose_dsn(base_dsn: str, schema: str) -> str:
-    """Append search_path to base_dsn via libpq 'options', properly URL-encoded."""
     pr = urlparse(base_dsn)
     if not pr.path or pr.path == "/":
         pr = pr._replace(path="/postgres")
 
     q = dict(parse_qsl(pr.query, keep_blank_values=True))
-    # Include a space after -c; let urlencode encode space, '=' and ','.
-    addition = f"-c search_path={schema},public"
 
-    if "options" in q and q["options"]:
-        # If options already present, append with a space; urlencode will encode spaces.
+    # Append our option; include a space after -c
+    addition = f"-c search_path={schema},public"
+    if q.get("options"):
         q["options"] = f"{q['options']} {addition}"
     else:
         q["options"] = addition
 
-    # IMPORTANT: don't mark '=' or space as safe; let them be percent-encoded
-    pr = pr._replace(query=urlencode(q, safe=":-_."))
+    # IMPORTANT: encode spaces as %20 (not '+') and encode '='/',' as well
+    pr = pr._replace(query=urlencode(q, safe=":-_.", quote_via=quote))
     return urlunparse(pr)
 
 
