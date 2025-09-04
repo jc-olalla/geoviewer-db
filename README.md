@@ -89,7 +89,7 @@ psql "postgresql://USER:PASSWORD@HOST:PORT/DBNAME" -c "SELECT nspname FROM pg_na
 
 Inspect local DB from your host:
 ```bash
-psql "postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+psql "postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable" -c "\dn"
 ```
 
 You should see the tenant schemas from `tenants.yaml` (e.g., `brandweer`). To list tables for a tenant: `\dt tenant_name.*`
