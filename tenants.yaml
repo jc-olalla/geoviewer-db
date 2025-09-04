@@ -3,9 +3,9 @@ tenants:
   - slug: brandweer
     dbname: brandweer_catalog
     dsn: postgresql://postgres:postgres@host.docker.internal:5432/brandweer_catalog
-    create: true
+    create: false
   - slug: vik
     dbname: vik_catalog
     dsn: postgresql://postgres:postgres@host.docker.internal:5432/vik_catalog
-    create: true
+    create: false
 
