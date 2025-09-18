@@ -1,5 +1,5 @@
 -- 02_sample_data.sql
--- Idempotent seed 
+-- Idempotent seed for 01_viewer_schema.sql
 
 -- -------------------------------------------------------------------
 -- Users (create if missing)
@@ -15,75 +15,179 @@ WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'user1');
 -- -------------------------------------------------------------------
 -- Viewers (owned by the right users; no hardcoded IDs)
 -- -------------------------------------------------------------------
-INSERT INTO viewers (name, slug, owner_id, is_public)
+INSERT INTO viewers (name, slug, owner_id, is_public, description)
 SELECT 'Main Viewer', 'main-viewer',
        (SELECT id FROM users WHERE username = 'admin'),
-       TRUE
+       TRUE,
+       'Public demo map'
 WHERE NOT EXISTS (SELECT 1 FROM viewers WHERE slug = 'main-viewer');
 
-INSERT INTO viewers (name, slug, owner_id, is_public)
+INSERT INTO viewers (name, slug, owner_id, is_public, description)
 SELECT 'Private Viewer', 'private-viewer',
        (SELECT id FROM users WHERE username = 'user1'),
-       FALSE
+       FALSE,
+       'Private workspace for user1'
 WHERE NOT EXISTS (SELECT 1 FROM viewers WHERE slug = 'private-viewer');
 
 -- -------------------------------------------------------------------
--- Layers 
+-- Viewer permissions (reflect ownership + an extra grant)
+-- -------------------------------------------------------------------
+-- Admin is owner of main-viewer
+WITH v AS (
+  SELECT id AS viewer_id FROM viewers WHERE slug = 'main-viewer'
+), u AS (
+  SELECT id AS user_id FROM users WHERE username = 'admin'
+)
+INSERT INTO viewer_permissions (viewer_id, user_id, access_level)
+SELECT v.viewer_id, u.user_id, 'owner'
+FROM v, u
+WHERE NOT EXISTS (
+  SELECT 1 FROM viewer_permissions vp
+  WHERE vp.viewer_id = v.viewer_id AND vp.user_id = u.user_id
+);
+
+-- user1 is owner of private-viewer
+WITH v AS (
+  SELECT id AS viewer_id FROM viewers WHERE slug = 'private-viewer'
+), u AS (
+  SELECT id AS user_id FROM users WHERE username = 'user1'
+)
+INSERT INTO viewer_permissions (viewer_id, user_id, access_level)
+SELECT v.viewer_id, u.user_id, 'owner'
+FROM v, u
+WHERE NOT EXISTS (
+  SELECT 1 FROM viewer_permissions vp
+  WHERE vp.viewer_id = v.viewer_id AND vp.user_id = u.user_id
+);
+
+-- (Optional example) Grant 'read' on private-viewer to admin as well
+WITH v AS (
+  SELECT id AS viewer_id FROM viewers WHERE slug = 'private-viewer'
+), u AS (
+  SELECT id AS user_id FROM users WHERE username = 'admin'
+)
+INSERT INTO viewer_permissions (viewer_id, user_id, access_level)
+SELECT v.viewer_id, u.user_id, 'read'
+FROM v, u
+WHERE NOT EXISTS (
+  SELECT 1 FROM viewer_permissions vp
+  WHERE vp.viewer_id = v.viewer_id AND vp.user_id = u.user_id
+);
+
+-- -------------------------------------------------------------------
+-- Layers (global catalog; no viewer_id column here)
 -- -------------------------------------------------------------------
 
--- BAG Pand (WMS) in Main Viewer
+-- BAG Pand (WMS)
 INSERT INTO layers (
-  viewer_id, type, name, title, url, layer_name, version, crs, format,
+  type, name, title, url, layer_name, version, crs, format,
   tiled, opacity, visible, sort_order, layer_params
 )
-SELECT v.id, 'wms', 'bag_pand', 'BAG Pand',
+SELECT 'wms', 'bag_pand', 'BAG Pand',
        'https://service.pdok.nl/lv/bag/wms/v2_0', 'pand', '1.1.1',
        'EPSG:3857', 'image/png',
        TRUE, 0.8, TRUE, 1, '{"TRANSPARENT":"true"}'::jsonb
-FROM viewers v
-WHERE v.slug = 'main-viewer'
-  AND NOT EXISTS (SELECT 1 FROM layers l WHERE l.name = 'bag_pand');
+WHERE NOT EXISTS (SELECT 1 FROM layers l WHERE l.name = 'bag_pand');
 
--- BAG Pand (WFS) in Private Viewer
+-- BAG Pand (WFS)
 INSERT INTO layers (
-  viewer_id, type, name, title, url, layer_name, version, crs, format,
+  type, name, title, url, layer_name, version, crs, format,
   tiled, opacity, visible, sort_order, layer_params
 )
-SELECT v.id, 'wfs', 'bag_pand_wfs', 'BAG Pand (WFS)',
+SELECT 'wfs', 'bag_pand_wfs', 'BAG Pand (WFS)',
        'https://service.pdok.nl/lv/bag/wfs/v2_0', 'pand', '2.0.0',
        'EPSG:28992', 'application/json',
        FALSE, 1.0, FALSE, 2, '{}'::jsonb
-FROM viewers v
-WHERE v.slug = 'private-viewer'
-  AND NOT EXISTS (SELECT 1 FROM layers l WHERE l.name = 'bag_pand_wfs');
+WHERE NOT EXISTS (SELECT 1 FROM layers l WHERE l.name = 'bag_pand_wfs');
 
--- Mogelijk Portiekwoningen (Supabase REST) in Main Viewer
+-- Mogelijk Portiekwoningen (Supabase REST)
 INSERT INTO layers (
-  viewer_id, type, name, title, url, layer_name, version, crs, format,
-  tiled, opacity, visible, sort_order, layer_params
+  type, name, title, url, layer_name, version, crs, format,
+  tiled, opacity, visible, sort_order, layer_params, extra_config
 )
-SELECT v.id, 'supabase_rest', 'mogelijk_portiekwoningen', 'Mogeglijk Portiekwoningen',
-       'https://dctmgvivsthofjcmejsd.supabase.co/rest/v1/buildings_geojson', 'dummy', 'v1',
+SELECT 'supabase_rest', 'mogelijk_portiekwoningen', 'Mogelijk Portiekwoningen',
+       'https://dctmgvivsthofjcmejsd.supabase.co/rest/v1/buildings_geojson', 'buildings_geojson', 'v1',
        'EPSG:3857', 'application/json',
-       FALSE, 1.0, FALSE, 2, '{}'::jsonb
-FROM viewers v
-WHERE v.slug = 'main-viewer'
-  AND NOT EXISTS (SELECT 1 FROM layers l WHERE l.name = 'mogelijk_portiekwoningen');
+       FALSE, 1.0, FALSE, 3, '{}'::jsonb, '{"headers":{"apikey":"<set-in-app-or-env>"}}'::jsonb
+WHERE NOT EXISTS (SELECT 1 FROM layers l WHERE l.name = 'mogelijk_portiekwoningen');
 
 -- -------------------------------------------------------------------
--- Viewer permissions (grant 'read' on the private viewer to user1)
+-- Layer ↔ Viewer relationship & per-viewer options
 -- -------------------------------------------------------------------
-WITH v_private AS (
-  SELECT id AS viewer_id FROM viewers WHERE slug = 'private-viewer'
-),
-u_user1 AS (
+-- Put BAG WMS + Supabase layer into Main Viewer
+WITH v AS (SELECT id AS viewer_id FROM viewers WHERE slug = 'main-viewer'),
+     l AS (
+       SELECT id, name FROM layers WHERE name IN ('bag_pand','mogelijk_portiekwoningen')
+     )
+INSERT INTO layer_permissions (viewer_id, layer_id, access_level, default_visible, can_toggle, sort_order_override)
+SELECT v.viewer_id, l.id,
+       'read',
+       CASE WHEN l.name = 'bag_pand' THEN TRUE ELSE FALSE END,
+       TRUE,
+       CASE WHEN l.name = 'bag_pand' THEN 1 ELSE 3 END
+FROM v, l
+WHERE NOT EXISTS (
+  SELECT 1 FROM layer_permissions lp
+  WHERE lp.viewer_id = v.viewer_id AND lp.layer_id = l.id
+);
+
+-- Put BAG WFS into Private Viewer and keep it hidden by default
+WITH v AS (SELECT id AS viewer_id FROM viewers WHERE slug = 'private-viewer'),
+     l AS (SELECT id FROM layers WHERE name = 'bag_pand_wfs')
+INSERT INTO layer_permissions (viewer_id, layer_id, access_level, default_visible, can_toggle, sort_order_override)
+SELECT v.viewer_id, l.id, 'read', FALSE, TRUE, 2
+FROM v, l
+WHERE NOT EXISTS (
+  SELECT 1 FROM layer_permissions lp
+  WHERE lp.viewer_id = v.viewer_id AND lp.layer_id = l.id
+);
+
+-- -------------------------------------------------------------------
+-- Styles (simple example) and Layer → Style binding
+-- -------------------------------------------------------------------
+-- Create a reusable simple style
+INSERT INTO styles (name, json, created_by)
+SELECT 'Simple Blue Fill',
+       '{
+          "version": 1,
+          "rules": [{
+            "name": "default",
+            "symbolizers": [{
+              "kind": "Fill",
+              "color": "#4C78A8",
+              "opacity": 0.6,
+              "outlineColor": "#1F2D3D",
+              "outlineWidth": 1
+            }]
+          }]
+        }'::jsonb,
+       (SELECT id FROM users WHERE username = 'admin')
+WHERE NOT EXISTS (SELECT 1 FROM styles s WHERE lower(s.name) = lower('Simple Blue Fill'));
+
+-- Bind the style to BAG Pand (WFS) (vector-ish response)
+WITH st AS (SELECT id AS style_id FROM styles WHERE name = 'Simple Blue Fill'),
+     ly AS (SELECT id AS layer_id FROM layers WHERE name = 'bag_pand_wfs')
+INSERT INTO layer_styles (layer_id, style_id, enabled)
+SELECT ly.layer_id, st.style_id, TRUE
+FROM st, ly
+WHERE NOT EXISTS (
+  SELECT 1 FROM layer_styles ls WHERE ls.layer_id = ly.layer_id
+);
+
+-- -------------------------------------------------------------------
+-- (Optional) Additional friendly grants
+-- -------------------------------------------------------------------
+-- Give user1 read access to main-viewer
+WITH v AS (
+  SELECT id AS viewer_id FROM viewers WHERE slug = 'main-viewer'
+), u AS (
   SELECT id AS user_id FROM users WHERE username = 'user1'
 )
 INSERT INTO viewer_permissions (viewer_id, user_id, access_level)
 SELECT v.viewer_id, u.user_id, 'read'
-FROM v_private v, u_user1 u
+FROM v, u
 WHERE NOT EXISTS (
-  SELECT 1
-  FROM viewer_permissions vp
+  SELECT 1 FROM viewer_permissions vp
   WHERE vp.viewer_id = v.viewer_id AND vp.user_id = u.user_id
 );
+
